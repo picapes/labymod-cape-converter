@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PiCapes - LabyMod Cape Converter</title>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:system-ui,sans-serif;background:#0d1117;color:#e6edf3;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
+.container{width:100%;max-width:700px}
+.card{background:#161b22;border:1px solid #30363d;border-radius:16px;padding:32px}
+.header{display:flex;align-items:center;gap:14px;margin-bottom:28px}
+.logo{width:42px;height:42px}
+h1{font-size:1.4rem}
+p{color:#8b949e}
+.dropzone{margin-top:24px;border:2px dashed #30363d;border-radius:12px;padding:50px 20px;text-align:center;cursor:pointer;transition:.2s}
+.dropzone:hover,.dropzone.drag{border-color:#58a6ff;background:#0f1722}
+.dropzone h2{font-size:1.1rem;margin-bottom:8px}
+.dropzone p{font-size:.95rem}
+input{display:none}
+.btn{margin-top:20px;width:100%;padding:12px;background:#238636;border:none;border-radius:8px;color:white;font-weight:600;cursor:pointer}
+.btn:hover{background:#2ea043}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.files{margin-top:20px;display:flex;flex-direction:column;gap:8px}
+.file{background:#0d1117;border:1px solid #30363d;padding:10px 14px;border-radius:8px;font-size:.9rem}
+.footer{margin-top:20px;text-align:center;color:#8b949e;font-size:.85rem}
+</style>
+</head>
+<body>
+
+<div class="container">
+    <div class="card">
+        <div class="header">
+            <img class="logo" src="https://assets.picapes.syanic.org/picapeslogo.png">
+            <div>
+                <h1>PiCapes's LabyMod Cape Converter</h1>
+                <p>Converts cape+elytra textures into LabyMod capes</p>
+            </div>
+        </div>
+
+        <div class="dropzone" id="dropzone">
+            <h2>Drop PNG files here</h2>
+            <p>or click to browse</p>
+        </div>
+
+        <input type="file" id="files" multiple accept="image/*">
+
+        <div class="files" id="fileList"></div>
+
+        <button class="btn" id="convertBtn" disabled>
+            Convert & Download ZIP
+        </button>
+
+        <div class="footer">
+            Simply Crops top-left 22×17 region proportionally from any resolution :)
+        </div>
+    </div>
+</div>
+
+<script>
+const dropzone=document.getElementById("dropzone");
+const input=document.getElementById("files");
+const fileList=document.getElementById("fileList");
+const convertBtn=document.getElementById("convertBtn");
+
+let files=[];
+
+dropzone.onclick=()=>input.click();
+
+input.onchange=e=>{
+    addFiles([...e.target.files]);
+};
+
+dropzone.addEventListener("dragover",e=>{
+    e.preventDefault();
+    dropzone.classList.add("drag");
+});
+
+dropzone.addEventListener("dragleave",()=>{
+    dropzone.classList.remove("drag");
+});
+
+dropzone.addEventListener("drop",e=>{
+    e.preventDefault();
+    dropzone.classList.remove("drag");
+    addFiles([...e.dataTransfer.files]);
+});
+
+function addFiles(newFiles){
+    files.push(...newFiles);
+    renderFiles();
+}
+
+function renderFiles(){
+    fileList.innerHTML="";
+    files.forEach(file=>{
+        const div=document.createElement("div");
+        div.className="file";
+        div.textContent=file.name;
+        fileList.appendChild(div);
+    });
+    convertBtn.disabled=!files.length;
+}
+
+const usedNames = new Set();
+convertBtn.onclick = async () => {
+    if (!files.length) return;
+
+    // Single file to direct PNG download
+    if (files.length === 1) {
+        const file = files[0];
+        const img = await loadImage(file);
+
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d");
+
+        const cropW = Math.round(img.width * (22 / 64));
+        const cropH = Math.round(img.height * (17 / 32));
+
+        canvas.width = cropW;
+        canvas.height = cropH;
+
+        ctx.drawImage(
+            img,
+            0, 0, cropW, cropH,
+            0, 0, cropW, cropH
+        );
+
+        const blob = await new Promise(
+            resolve => canvas.toBlob(resolve, "image/png")
+        );
+
+        const outputName =
+            file.name.replace(/\.[^.]+$/, "") + ".png";
+
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = outputName;
+        a.click();
+
+        URL.revokeObjectURL(a.href);
+        return;
+    }
+
+    // Multiple files to ZIP
+    const zip = new JSZip();
+    const usedNames = new Set();
+
+    for (const file of files) {
+        const img = await loadImage(file);
+
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d");
+
+        const cropW = Math.round(img.width * (22 / 64));
+        const cropH = Math.round(img.height * (17 / 32));
+
+        canvas.width = cropW;
+        canvas.height = cropH;
+
+        ctx.drawImage(
+            img,
+            0, 0, cropW, cropH,
+            0, 0, cropW, cropH
+        );
+
+        const blob = await new Promise(
+            resolve => canvas.toBlob(resolve, "image/png")
+        );
+
+        let outputName =
+            file.name.replace(/\.[^.]+$/, "") + ".png";
+
+        let counter = 1;
+        const originalName = outputName;
+
+        while (usedNames.has(outputName)) {
+            outputName = originalName.replace(
+                ".png",
+                ` (${counter++}).png`
+            );
+        }
+
+        usedNames.add(outputName);
+        zip.file(outputName, blob);
+    }
+
+    const content = await zip.generateAsync({
+        type: "blob"
+    });
+
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(content);
+    a.download = "labymod-capes.zip";
+    a.click();
+
+    URL.revokeObjectURL(a.href);
+};
+
+function loadImage(file){
+    return new Promise(resolve=>{
+        const img=new Image();
+        img.onload=()=>resolve(img);
+        img.src=URL.createObjectURL(file);
+    });
+}
+</script>
+
+</body>
+</html>
